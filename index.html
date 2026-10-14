@@ -624,11 +624,34 @@ const LINE_WORKER_URL = 'https://twilight-credit-6e90.teddreo-tw.workers.dev/not
 const SITE_NAME = 'teddreo-star-side-ring';
 const LINE_LOGIN_CHANNEL_ID = '2006819384';
 const LINE_LOGIN_REDIRECT_URI = 'https://twilight-credit-6e90.teddreo-tw.workers.dev/line-login/callback';
-function getCustomerLineUid(){ return sessionStorage.getItem('teddreo_line_uid') || ''; }
-function getCustomerLineName(){ return sessionStorage.getItem('teddreo_line_name') || ''; }
+/* 登入暫存:手機上 LINE 登入常會跳去 LINE App 再從新分頁/新視窗導回,sessionStorage 在新分頁會讀不到,
+   因此同時寫入 localStorage(附時間戳記,逾時自動作廢),任一邊讀得到就能還原設計。 */
+function lsSet(k,v){ try{ localStorage.setItem(k, JSON.stringify({v:v,t:Date.now()})); }catch(e){} }
+function lsGet(k,maxAgeMs){ try{ const o=JSON.parse(localStorage.getItem(k)||'null'); if(!o) return null; if(Date.now()-o.t>maxAgeMs){ localStorage.removeItem(k); return null; } return o.v; }catch(e){ return null; } }
+function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
+function storeSet(k,v){ try{ sessionStorage.setItem(k,v); }catch(e){} lsSet(k,v); }
+function storeGet(k,maxAgeMs){ let v=null; try{ v=sessionStorage.getItem(k); }catch(e){} return v || lsGet(k,maxAgeMs); }
+function storeDel(k){ try{ sessionStorage.removeItem(k); }catch(e){} lsDel(k); }
+const LOGIN_BACKUP_MAX_MS = 30*60*1000;
+const LINE_UID_MAX_MS = 12*60*60*1000;
+function getCustomerLineUid(){ return storeGet('teddreo_line_uid', LINE_UID_MAX_MS) || ''; }
+function getCustomerLineName(){ return storeGet('teddreo_line_name', LINE_UID_MAX_MS) || ''; }
+function showTopNotice(msg){
+  try{
+    let el = document.getElementById('topNoticeBar');
+    if(!el){
+      el = document.createElement('div');
+      el.id = 'topNoticeBar';
+      el.style.cssText = 'position:fixed;left:12px;right:12px;top:12px;z-index:99999;background:#fff8e6;color:#5a4300;border:1px solid #e6c36a;border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.5;box-shadow:0 6px 20px rgba(0,0,0,.15);';
+      el.onclick = function(){ el.remove(); };
+      document.body.appendChild(el);
+    }
+    el.textContent = msg + '(點此關閉)';
+  }catch(e){}
+}
 function startLineLogin(){
-  try{ sessionStorage.setItem('teddreo_design_backup', JSON.stringify(state)); }catch(e){}
-  sessionStorage.setItem('teddreo_auto_submit_after_login', '1');
+  try{ storeSet('teddreo_design_backup', JSON.stringify(state)); }catch(e){}
+  storeSet('teddreo_auto_submit_after_login', '1');
   const returnUrl = location.origin + location.pathname;
   const authUrl = 'https://access.line.me/oauth2/v2.1/authorize?response_type=code&client_id=' + LINE_LOGIN_CHANNEL_ID + '&redirect_uri=' + encodeURIComponent(LINE_LOGIN_REDIRECT_URI) + '&state=' + encodeURIComponent(returnUrl) + '&scope=profile';
   location.href = authUrl;
@@ -638,8 +661,9 @@ function startLineLogin(){
   const uid = params.get('line_uid');
   const name = params.get('line_name');
   if (uid) {
-    sessionStorage.setItem('teddreo_line_uid', uid);
-    sessionStorage.setItem('teddreo_line_name', name || '');
+    storeSet('teddreo_line_uid', uid);
+    window.__lineJustLoggedIn = true;
+    storeSet('teddreo_line_name', name || '');
     const cleanUrl = new URL(location.href);
     cleanUrl.searchParams.delete('line_uid');
     cleanUrl.searchParams.delete('line_name');
@@ -2367,14 +2391,18 @@ initThree();
 
 /* LINE 登入完成導回後：還原之前暫存的設計狀態，若原本就是要自動送出設計圖，則自動幫顧客完成送出 */
 (function restoreDesignAfterLogin(){
-  const backup = sessionStorage.getItem('teddreo_design_backup');
-  const shouldAutoSubmit = sessionStorage.getItem('teddreo_auto_submit_after_login');
+  const backup = storeGet('teddreo_design_backup', LOGIN_BACKUP_MAX_MS);
+  const shouldAutoSubmit = storeGet('teddreo_auto_submit_after_login', LOGIN_BACKUP_MAX_MS);
   if (backup) {
     try{ Object.assign(state, JSON.parse(backup)); }catch(e){}
-    sessionStorage.removeItem('teddreo_design_backup');
+    storeDel('teddreo_design_backup');
+  }
+  if (window.__lineJustLoggedIn && !backup) {
+    /* 登入成功導回,但找不到先前的設計(例如換了瀏覽器或暫存已逾時):明確告知,避免顧客以為已送出 */
+    showTopNotice('LINE 登入成功,但沒有找到您剛才的設計,尚未送出。請重新完成設計後,再按「確認訂單」送出。');
   }
   if (shouldAutoSubmit && getCustomerLineUid()) {
-    sessionStorage.removeItem('teddreo_auto_submit_after_login');
+    storeDel('teddreo_auto_submit_after_login');
     state.revealedStep = SECTIONS.length - 1;
     state.openSection = 'confirm';
     refreshAll();
