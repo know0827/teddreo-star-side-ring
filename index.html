@@ -1757,7 +1757,7 @@ function sectionBody(id){
           <button class="act" onclick="downloadDesignPhoto()">下載我的設計圖</button>
         </div>
         <div class="action-row">
-          <button class="act primary" id="submitDesignBtn" onclick="submitOrLoginThenSend()">確認訂單，登入LINE並送出設計圖</button>
+          <button class="act primary" id="submitDesignBtn" onclick="submitOrLoginThenSend()">登入 LINE 並送出設計圖</button>
         </div>
         <p class="notice" id="submitStatusMsg" style="display:none;"></p>
       </div>
@@ -2206,6 +2206,7 @@ function setSubmitStatus(msg, tone){
   const el = document.getElementById('submitStatusMsg');
   if(!el) return;
   el.textContent = msg;
+  el.style.whiteSpace = 'pre-line';
   el.style.display = msg ? 'block' : 'none';
   el.style.color = tone==='error' ? 'var(--danger)' : (tone==='ok' ? '#4a7a5c' : 'var(--ink-soft)');
 }
@@ -2338,7 +2339,7 @@ async function submitDesignByLine(){
       throw new Error(result.error || ('status ' + res.status));
     }
 
-    setSubmitStatus('已成功送出設計圖與訂單資訊，我們會盡快與您聯繫，謝謝！', 'ok');
+    setSubmitStatus('設計圖已送出！最後一步：請回到官網的商品頁選擇您要訂製的戒指規格並下單付款。\n我們核對設計圖與訂單後,會在 LINE 與您聯繫確認細節👩🏻‍🏭', 'ok');
   }catch(err){
     console.error('submitDesignByLine failed:', err);
     setSubmitStatus('送出時發生錯誤，請稍後再試一次，或直接聯繫官方 LINE 回報訂單。', 'error');
@@ -2396,7 +2397,7 @@ initThree();
   }
   if (window.__lineJustLoggedIn && !backup) {
     /* 登入成功導回,但找不到先前的設計(例如換了瀏覽器或暫存已逾時):明確告知,避免顧客以為已送出 */
-    showTopNotice('LINE 登入成功,但沒有找到您剛才的設計,尚未送出。請重新完成設計後,再按「確認訂單」送出。');
+    showTopNotice('LINE 登入成功,但沒有找到您剛才的設計,尚未送出。請重新完成設計後,再按「登入 LINE 並送出設計圖」。');
   }
   if (shouldAutoSubmit && getCustomerLineUid()) {
     storeDel('teddreo_auto_submit_after_login');
