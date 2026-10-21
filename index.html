@@ -1760,9 +1760,6 @@ function sectionBody(id){
           <button class="act primary" id="submitDesignBtn" onclick="submitOrLoginThenSend()">確認訂單，登入LINE並送出設計圖</button>
         </div>
         <p class="notice" id="submitStatusMsg" style="display:none;"></p>
-        <div class="action-row">
-          <button class="act" onclick="shareOrderToLine()">一鍵複製並前往 LINE</button>
-        </div>
       </div>
       <div class="restart"><button onclick="restartAll()">重新開始設計</button></div>
     `;
@@ -2344,7 +2341,7 @@ async function submitDesignByLine(){
     setSubmitStatus('已成功送出設計圖與訂單資訊，我們會盡快與您聯繫，謝謝！', 'ok');
   }catch(err){
     console.error('submitDesignByLine failed:', err);
-    setSubmitStatus('送出時發生錯誤，請稍後再試一次，或改用下方「複製並前往 LINE」回報訂單。', 'error');
+    setSubmitStatus('送出時發生錯誤，請稍後再試一次，或直接聯繫官方 LINE 回報訂單。', 'error');
   }finally{
     btn.disabled = false;
     btn.textContent = origLabel;
