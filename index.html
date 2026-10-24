@@ -331,7 +331,7 @@ input.text-input:focus-visible,input.text-input:focus,select.text-input:focus-vi
   padding:22px 18px;display:flex;flex-direction:column;gap:16px;
 }
 .efp-preview-row{text-align:center;}
-.efp-preview-text{font-size:21px;color:var(--ink);line-height:1.4;word-break:break-word;}
+.efp-preview-text{font-size:21px;font-weight:700;letter-spacing:0.25em;color:var(--ink);line-height:1.4;word-break:break-word;}
 .efp-preview-caption{font-size:10.5px;letter-spacing:0.04em;color:var(--ink-faint);margin:6px 0 0;}
 .efp-preview-line{height:1px;background:var(--line);}
 
@@ -2167,8 +2167,26 @@ function buildDesignPhotoCanvas(){
     engraveRows.forEach((r,i)=>{
       const ry = startY + i*rowSpacing;
       ctx.fillStyle = r.color;
-      ctx.font = `27px ${r.fam}`;
-      ctx.fillText(r.text, centerX, ry);
+      /* 與3D戒指刻字一致:粗體700、字距0.25em,逐字繪製置中 */
+      {
+        const fs0 = 27, gap0 = fs0*0.25;
+        const chs = Array.from(r.text);
+        ctx.font = `700 ${fs0}px ${r.fam}`;
+        const ws = chs.map(c=>ctx.measureText(c).width);
+        let tw = ws.reduce((a,b)=>a+b,0) + gap0*Math.max(0,chs.length-1);
+        const maxW = engraveColW - 40;
+        let fs = fs0, gap = gap0;
+        if(tw > maxW){
+          const k = maxW/tw; fs = fs0*k; gap = gap0*k;
+          ctx.font = `700 ${fs}px ${r.fam}`;
+          chs.forEach((c,j)=>{ ws[j] = ctx.measureText(c).width; });
+          tw = ws.reduce((a,b)=>a+b,0) + gap*Math.max(0,chs.length-1);
+        }
+        const prevAlign = ctx.textAlign; ctx.textAlign = 'left';
+        let px = centerX - tw/2;
+        chs.forEach((c,j)=>{ ctx.fillText(c, px, ry); px += ws[j] + gap; });
+        ctx.textAlign = prevAlign;
+      }
       ctx.fillStyle = '#a8a196';
       ctx.font = '10px "Noto Sans TC", sans-serif';
       ctx.fillText(r.label, centerX, ry+30);
