@@ -1363,7 +1363,49 @@ function preloadGemTextures(){
   });
 }
 
+/* ---------- 刻字字體載入保護 ----------
+   3D 刻字是畫在 canvas 貼圖上,canvas 不會等網路字體載入,字體未到時會先用備用字體畫。
+   1) 重建戒指前,先確認刻字用到的字體(含實際文字)已載入;未載入就先載入,最多等 2 秒再畫。
+   2) 字體載入完成(loadingdone)後,若剛畫的是備用字體,自動重畫一次。 */
+const ENGRAVE_FONT_WAIT_MS = 2000;
+let _rebuildSeq = 0, _engFontSig = '';
+function _engraveFontNeeds(){
+  const need = [];
+  ['Inner','Outer','Side'].forEach(k=>{
+    if(state['engrave'+k+'On'] && state['engrave'+k+'Text']){
+      const fo = ENGRAVE_FONTS.find(f=>f.key===state['engrave'+k+'Font']) || ENGRAVE_FONTS[0];
+      need.push({font:`700 40px ${fo.family}`, text:state['engrave'+k+'Text']});
+    }
+  });
+  return need;
+}
+function _engraveFontOK(n){ try{ return document.fonts.check(n.font, n.text); }catch(e){ return true; } }
+function _engraveFontSig(need){ return need.map(n=>n.font+'|'+n.text+'|'+_engraveFontOK(n)).join(';'); }
 function rebuildRing(){
+  const need = _engraveFontNeeds();
+  const seq = ++_rebuildSeq;
+  if(!need.length || !document.fonts || need.every(_engraveFontOK)){
+    _engFontSig = _engraveFontSig(need);
+    _rebuildRingNow();
+    return;
+  }
+  const loads = Promise.all(need.map(n=>document.fonts.load(n.font, n.text).catch(()=>{})));
+  const timeout = new Promise(r=>setTimeout(r, ENGRAVE_FONT_WAIT_MS));
+  Promise.race([loads, timeout]).then(()=>{
+    if(seq !== _rebuildSeq) return; /* 期間又有新的更新,以最新那次為準 */
+    _engFontSig = _engraveFontSig(_engraveFontNeeds());
+    _rebuildRingNow();
+  });
+}
+if(document.fonts && document.fonts.addEventListener){
+  document.fonts.addEventListener('loadingdone', ()=>{
+    const need = _engraveFontNeeds();
+    if(!need.length) return;
+    const sig = _engraveFontSig(need);
+    if(sig !== _engFontSig){ _engFontSig = sig; ++_rebuildSeq; _rebuildRingNow(); }
+  });
+}
+function _rebuildRingNow(){
   const viewShape = state.previewShape || state.shape; /* 停用選項預覽時,3D畫面顯示預覽形狀,但不影響實際選取的戒指形狀 */
   if(!scene || !ringGroup) return;
   while(ringGroup.children.length) ringGroup.remove(ringGroup.children[0]);
