@@ -552,6 +552,9 @@ const _ENG_CJK_RE = /[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]/;
 function engraveLatinScale(fam){ const f = ENGRAVE_FONTS.find(x=>x.family===fam); return (f && f.sz) || 1; }
 function engraveCharPx(ch, base, fam){ return _ENG_CJK_RE.test(ch) ? base : base*engraveLatinScale(fam); }
 function engraveFontOf(base, ch, fam){ return `700 ${engraveCharPx(ch, base, fam)}px ${fam}`; }
+/* 個別字體的字距(以字級倍數表示);沒列在這裡的字體用預設 0.0625em。Italianno:3D 上 10px(字級 88)= 0.1136em */
+const ENGRAVE_GAP_EM = {italianno: 10/88};
+function engraveGapEm(fam){ const f = ENGRAVE_FONTS.find(x=>x.family===fam); return (f && ENGRAVE_GAP_EM[f.key]) || 0.0625; }
 /* 預覽框用:把非中日韓的連續文字包上 font-size 係數(輸入已是跳脫過的 HTML 文字) */
 function engravePreviewHTML(escaped, fam){
   const sz = engraveLatinScale(fam);
@@ -1311,8 +1314,8 @@ function buildEngraveTexture(text, colorHex, flip, fontFamily){
   ctx.clearRect(0,0,w,h);
   ctx.fillStyle = colorHex;
   ctx.textBaseline = 'middle';
-  let fontSize = 80;
-  const letterGap = 5; /* 字距 5px = 字級(80)的 6.25%,與預覽框、下載設計圖一致 */
+  let fontSize = 88; /* 3D 刻字字級(原 80,放大 10%) */
+  const letterGap = fontSize*engraveGapEm(fontFamily || "'Noto Serif TC', serif"); /* 字距 = 字級倍數,與預覽框、下載設計圖比例一致 */
   let gapUsed = letterGap;
   const chars = Array.from(text);
   const fam = fontFamily || "'Noto Serif TC', serif";
@@ -1607,7 +1610,7 @@ function engravePreviewSVG(){
   const rowsHTML = rows.map((row,i)=>`
     ${i>0 ? '<div class="efp-preview-line"></div>' : ''}
     <div class="efp-preview-row">
-      <div class="efp-preview-text" style="font-family:${row.fam};color:${row.c};">${engravePreviewHTML(row.t, row.fam)}</div>
+      <div class="efp-preview-text" style="font-family:${row.fam};color:${row.c};letter-spacing:${engraveGapEm(row.fam)}em;">${engravePreviewHTML(row.t, row.fam)}</div>
       ${row.caption ? `<p class="efp-preview-caption">${row.caption}</p>` : ''}
     </div>`).join('');
   return `<div class="efp-preview-wrap">${rowsHTML}</div>`;
@@ -2227,7 +2230,7 @@ function buildDesignPhotoCanvas(){
       ctx.fillStyle = r.color;
       /* 與3D戒指刻字一致:粗體700、字距0.25em,逐字繪製置中 */
       {
-        const fs0 = 27, gap0 = fs0*0.0625;
+        const fs0 = 27, gap0 = fs0*engraveGapEm(r.fam);
         const chs = Array.from(r.text);
         const ws = chs.map(c=>{ ctx.font = engraveFontOf(fs0, c, r.fam); return ctx.measureText(c).width; });
         let tw = ws.reduce((a,b)=>a+b,0) + gap0*Math.max(0,chs.length-1);
