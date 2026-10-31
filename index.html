@@ -331,7 +331,7 @@ input.text-input:focus-visible,input.text-input:focus,select.text-input:focus-vi
   padding:22px 18px;display:flex;flex-direction:column;gap:16px;
 }
 .efp-preview-row{text-align:center;}
-.efp-preview-text{font-size:21px;font-weight:700;letter-spacing:0.25em;color:var(--ink);line-height:1.4;word-break:break-word;}
+.efp-preview-text{font-size:21px;font-weight:700;letter-spacing:0.15em;color:var(--ink);line-height:1.4;word-break:break-word;}
 .efp-preview-caption{font-size:10.5px;letter-spacing:0.04em;color:var(--ink-faint);margin:6px 0 0;}
 .efp-preview-line{height:1px;background:var(--line);}
 
@@ -1297,7 +1297,8 @@ function buildEngraveTexture(text, colorHex, flip, fontFamily){
   ctx.fillStyle = colorHex;
   ctx.textBaseline = 'middle';
   let fontSize = 80;
-  const letterGap = 20; /* 加大字距,讓刻字看起來更舒展、不擁擠 */
+  const letterGap = 12; /* 字距 = 字級(80)的 15%,與預覽框、下載設計圖一致 */
+  let gapUsed = letterGap;
   const chars = Array.from(text);
   const fam = fontFamily || "'Noto Serif TC', serif";
   ctx.font = `700 ${fontSize}px ${fam}`;
@@ -1310,7 +1311,8 @@ function buildEngraveTexture(text, colorHex, flip, fontFamily){
     fontSize = Math.max(36, Math.floor(fontSize*scale));
     ctx.font = `700 ${fontSize}px ${fam}`;
     widths = chars.map(ch => ctx.measureText(ch).width);
-    totalWidth = widths.reduce((a,b)=>a+b,0) + (letterGap*scale)*Math.max(0,chars.length-1);
+    gapUsed = letterGap*scale; /* 字距隨字級等比縮小,維持 15% */
+    totalWidth = widths.reduce((a,b)=>a+b,0) + gapUsed*Math.max(0,chars.length-1);
   }
   /* 文字在畫布上完全自然繪製,不做任何畫布層級的翻轉;所有方向修正統一移到材質座標(UV)層級處理,
      避免像先前那樣「畫布翻轉」與「材質翻轉」兩種不同機制混用,導致彼此干擾、難以預期 */
@@ -1318,7 +1320,7 @@ function buildEngraveTexture(text, colorHex, flip, fontFamily){
   ctx.textAlign = 'left';
   chars.forEach((ch,i)=>{
     ctx.fillText(ch, x, h/2);
-    x += widths[i] + letterGap;
+    x += widths[i] + gapUsed;
   });
   const tex = new THREE.CanvasTexture(c);
   tex.wrapS = THREE.RepeatWrapping; tex.wrapT = THREE.RepeatWrapping;
@@ -2211,7 +2213,7 @@ function buildDesignPhotoCanvas(){
       ctx.fillStyle = r.color;
       /* 與3D戒指刻字一致:粗體700、字距0.25em,逐字繪製置中 */
       {
-        const fs0 = 27, gap0 = fs0*0.25;
+        const fs0 = 27, gap0 = fs0*0.15;
         const chs = Array.from(r.text);
         ctx.font = `700 ${fs0}px ${r.fam}`;
         const ws = chs.map(c=>ctx.measureText(c).width);
