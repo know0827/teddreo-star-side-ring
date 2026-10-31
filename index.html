@@ -331,7 +331,7 @@ input.text-input:focus-visible,input.text-input:focus,select.text-input:focus-vi
   padding:22px 18px;display:flex;flex-direction:column;gap:16px;
 }
 .efp-preview-row{text-align:center;}
-.efp-preview-text{font-size:21px;font-weight:700;letter-spacing:0.15em;color:var(--ink);line-height:1.4;word-break:break-word;}
+.efp-preview-text{font-size:21px;font-weight:700;letter-spacing:0.0625em;color:var(--ink);line-height:1.4;word-break:break-word;}
 .efp-preview-caption{font-size:10.5px;letter-spacing:0.04em;color:var(--ink-faint);margin:6px 0 0;}
 .efp-preview-line{height:1px;background:var(--line);}
 
@@ -543,6 +543,21 @@ const ENGRAVE_FONTS = [
   {key:'notosans', name:'思源黑體 Noto Sans TC', family:"'Noto Sans TC', sans-serif", sub:'現代簡約', category:'tc'},
   {key:'klee', name:'Klee One', family:"'Klee One', sans-serif", sub:'溫潤手寫圓體', category:'tc'}
 ];
+/* 各字體的「英文字母視覺大小」校正:同樣字級下,不同字體的字母高度差異很大
+   (例如 Italianno 偏小、Cinzel、Petit Formal Script 偏大),乘上係數讓刻在戒指上的英文大小接近。
+   中日韓文字不調整(英文字體的中文是用系統字體補上,放大縮小會讓中文跟著忽大忽小)。 */
+const ENGRAVE_LATIN_SCALE = {cormorant:1.21, playfair:0.99, cinzel:0.93, bodoni:1.02, ebgaramond:1.12, greatvibes:1.09, dancing:1.23, italianno:1.35, petit:0.86, montserrat:0.95, specialelite:1.01, notoserif:0.95, notosans:0.93, klee:1.03};
+ENGRAVE_FONTS.forEach(f=>{ f.sz = ENGRAVE_LATIN_SCALE[f.key] || 1; });
+const _ENG_CJK_RE = /[\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]/;
+function engraveLatinScale(fam){ const f = ENGRAVE_FONTS.find(x=>x.family===fam); return (f && f.sz) || 1; }
+function engraveCharPx(ch, base, fam){ return _ENG_CJK_RE.test(ch) ? base : base*engraveLatinScale(fam); }
+function engraveFontOf(base, ch, fam){ return `700 ${engraveCharPx(ch, base, fam)}px ${fam}`; }
+/* 預覽框用:把非中日韓的連續文字包上 font-size 係數(輸入已是跳脫過的 HTML 文字) */
+function engravePreviewHTML(escaped, fam){
+  const sz = engraveLatinScale(fam);
+  if(sz === 1) return escaped;
+  return escaped.replace(/[^\u2E80-\u9FFF\uAC00-\uD7AF\uF900-\uFAFF\uFF00-\uFFEF]+/g, m => `<span style="font-size:${sz}em">${m}</span>`);
+}
 const ENGRAVE_FONT_CATEGORIES = [
   {key:'serif', label:'英文襯線'},
   {key:'script', label:'英文手寫／花體'},
@@ -1297,20 +1312,18 @@ function buildEngraveTexture(text, colorHex, flip, fontFamily){
   ctx.fillStyle = colorHex;
   ctx.textBaseline = 'middle';
   let fontSize = 80;
-  const letterGap = 12; /* 字距 = 字級(80)的 15%,與預覽框、下載設計圖一致 */
+  const letterGap = 5; /* 字距 5px = 字級(80)的 6.25%,與預覽框、下載設計圖一致 */
   let gapUsed = letterGap;
   const chars = Array.from(text);
   const fam = fontFamily || "'Noto Serif TC', serif";
-  ctx.font = `700 ${fontSize}px ${fam}`;
-  let widths = chars.map(ch => ctx.measureText(ch).width);
+  let widths = chars.map(ch => { ctx.font = engraveFontOf(fontSize, ch, fam); return ctx.measureText(ch).width; });
   let totalWidth = widths.reduce((a,b)=>a+b,0) + letterGap*Math.max(0,chars.length-1);
   const maxWidth = w*0.9;
   if(totalWidth > maxWidth){
     /* 文字過長時等比縮小字級,避免超出畫布導致重疊或被裁切 */
     const scale = maxWidth/totalWidth;
     fontSize = Math.max(36, Math.floor(fontSize*scale));
-    ctx.font = `700 ${fontSize}px ${fam}`;
-    widths = chars.map(ch => ctx.measureText(ch).width);
+    widths = chars.map(ch => { ctx.font = engraveFontOf(fontSize, ch, fam); return ctx.measureText(ch).width; });
     gapUsed = letterGap*scale; /* 字距隨字級等比縮小,維持 15% */
     totalWidth = widths.reduce((a,b)=>a+b,0) + gapUsed*Math.max(0,chars.length-1);
   }
@@ -1319,6 +1332,7 @@ function buildEngraveTexture(text, colorHex, flip, fontFamily){
   let x = w/2 - totalWidth/2;
   ctx.textAlign = 'left';
   chars.forEach((ch,i)=>{
+    ctx.font = engraveFontOf(fontSize, ch, fam);
     ctx.fillText(ch, x, h/2);
     x += widths[i] + gapUsed;
   });
@@ -1593,7 +1607,7 @@ function engravePreviewSVG(){
   const rowsHTML = rows.map((row,i)=>`
     ${i>0 ? '<div class="efp-preview-line"></div>' : ''}
     <div class="efp-preview-row">
-      <div class="efp-preview-text" style="font-family:${row.fam};color:${row.c};">${row.t}</div>
+      <div class="efp-preview-text" style="font-family:${row.fam};color:${row.c};">${engravePreviewHTML(row.t, row.fam)}</div>
       ${row.caption ? `<p class="efp-preview-caption">${row.caption}</p>` : ''}
     </div>`).join('');
   return `<div class="efp-preview-wrap">${rowsHTML}</div>`;
@@ -2213,22 +2227,20 @@ function buildDesignPhotoCanvas(){
       ctx.fillStyle = r.color;
       /* 與3D戒指刻字一致:粗體700、字距0.25em,逐字繪製置中 */
       {
-        const fs0 = 27, gap0 = fs0*0.15;
+        const fs0 = 27, gap0 = fs0*0.0625;
         const chs = Array.from(r.text);
-        ctx.font = `700 ${fs0}px ${r.fam}`;
-        const ws = chs.map(c=>ctx.measureText(c).width);
+        const ws = chs.map(c=>{ ctx.font = engraveFontOf(fs0, c, r.fam); return ctx.measureText(c).width; });
         let tw = ws.reduce((a,b)=>a+b,0) + gap0*Math.max(0,chs.length-1);
         const maxW = engraveColW - 40;
         let fs = fs0, gap = gap0;
         if(tw > maxW){
           const k = maxW/tw; fs = fs0*k; gap = gap0*k;
-          ctx.font = `700 ${fs}px ${r.fam}`;
-          chs.forEach((c,j)=>{ ws[j] = ctx.measureText(c).width; });
+          chs.forEach((c,j)=>{ ctx.font = engraveFontOf(fs, c, r.fam); ws[j] = ctx.measureText(c).width; });
           tw = ws.reduce((a,b)=>a+b,0) + gap*Math.max(0,chs.length-1);
         }
         const prevAlign = ctx.textAlign; ctx.textAlign = 'left';
         let px = centerX - tw/2;
-        chs.forEach((c,j)=>{ ctx.fillText(c, px, ry); px += ws[j] + gap; });
+        chs.forEach((c,j)=>{ ctx.font = engraveFontOf(fs, c, r.fam); ctx.fillText(c, px, ry); px += ws[j] + gap; });
         ctx.textAlign = prevAlign;
       }
       ctx.fillStyle = '#a8a196';
