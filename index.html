@@ -484,7 +484,7 @@ function ensureLogoLoaded(){
 const SHAPES = [
   {key:'roundback', name:'圓背', sub:'Round Back', desc:'內側平貼、外側圓潤,是最推薦的舒適基礎款。'},
   {key:'flat',  name:'平邊', sub:'Flat', desc:'內外側平面直角,線條俐落。'},
-  {key:'deco',  name:'花邊', sub:'Textured', desc:'不規則自然波浪造型,帶有手工敲打質感。'}
+  {key:'deco',  name:'花邊', sub:'Textured', desc:'扁平戒圈整圈扭轉起伏,折面帶有手工敲打質感。'}
 ];
 const WIDTHS = [2, 3, 3.5, 4];
 /* 各形狀可施作的寬度範圍;圓背、平邊、花邊皆開放 3mm、4mm */
@@ -988,16 +988,83 @@ function animate(){
 }
 
 /* ---- 依形狀產生真實剖面(x=厚度/徑向, y=寬度/沿手指軸向), 皆為 1:1 mm ---- */
+/* 花邊(依實拍照片):扁平帶狀戒圈整圈扭轉約 6 次,扭轉的轉折處形成斜向折線,
+   戒圈上下緣隨之波浪起伏,內外圈一起扭轉;另加少量不規則量,保留手工敲打感 */
+const DECO_WAVES = 6, DECO_PHASE = 0; /* 相位 0:大芒星(90 度)剛好位在上下波浪的浪峰,且此處本來就是不扭轉的位置 */
+/* 主石與六芒星所在的區段(戒圈正上方 90 度附近,只涵蓋大芒星)保持平整,此段只取消扭轉、表面保持平面,上下波浪照常延續;一離開大芒星就接回扭轉 */
+/* 不扭轉區:大芒星與每顆側邊星星各自一段(中心角度、平面半寬、過渡寬度),於重建戒指時依星星數量更新 */
+let DECO_FLAT_ZONES = [{c:Math.PI/2, flat:0.36, ramp:0.25}];
+function decoFlatBlend(theta){
+  let f = 1;
+  DECO_FLAT_ZONES.forEach(z=>{
+    const d = Math.abs(((theta - z.c) % (Math.PI*2) + Math.PI*3) % (Math.PI*2) - Math.PI);
+    const t = Math.min(1, Math.max(0, (d - z.flat)/z.ramp));
+    f *= t*t*(3 - 2*t);
+  });
+  return f;
+}
+function decoTwist(theta){
+  /* 柔和版:扭轉幅度較小、轉折較圓順,去除不規則雜訊 */
+  const s = Math.sin(DECO_WAVES*theta + DECO_PHASE);
+  return decoFlatBlend(theta)*0.24*Math.sign(s)*Math.pow(Math.abs(s),0.85);
+}
 function decoWaveOffset(theta){
-  /* 多組不同頻率與相位疊加,避免規律的正弦波感,呈現更自然的手工敲打起伏 */
-  return 0.22*Math.sin(theta*5 + 0.4)
-       + 0.13*Math.sin(theta*8 + 2.1)
-       + 0.09*Math.sin(theta*13 + 1.2);
+  return 0.05*Math.cos(DECO_WAVES*theta + DECO_PHASE);
 }
 function decoWaveWidthOffset(theta){
-  return 0.16*Math.cos(theta*5 + 1.1)
-       + 0.10*Math.cos(theta*8 + 0.3)
-       + 0.06*Math.cos(theta*13 + 2.4);
+  return 0.18*Math.cos(DECO_WAVES*theta + DECO_PHASE);
+}
+/* 花邊戒圈表面上「沿手指軸向位置 y」的點:side=1 外圈、-1 內圈,回傳半徑與實際 z */
+function decoSurface(theta, y, side, halfThick, R){
+  const a = decoTwist(theta);
+  return { r: R + decoWaveOffset(theta) + side*halfThick/Math.cos(a) - y*Math.tan(a),
+           z: y + decoWaveWidthOffset(theta) };
+}
+function getDecoProfile(halfWidth, halfThick){
+  const rc = Math.min(halfThick*0.5, halfWidth*0.3), K = 5, pts = [];
+  [[halfThick-rc, halfWidth-rc, 0],[-halfThick+rc, halfWidth-rc, Math.PI/2],
+   [-halfThick+rc, -halfWidth+rc, Math.PI],[halfThick-rc, -halfWidth+rc, Math.PI*1.5]].forEach(([cx,cy,a0])=>{
+    for(let k=0;k<=K;k++){ const a=a0+(k/K)*Math.PI/2; pts.push({x:cx+rc*Math.cos(a), y:cy+rc*Math.sin(a)}); }
+  });
+  return pts;
+}
+function buildDecoRingGeometry(halfWidth, halfThick, R){
+  const prof = getDecoProfile(halfWidth, halfThick); prof.push(prof[0]);
+  const Pn = prof.length, U = 360;
+  const cum = [0];
+  for(let i=1;i<Pn;i++) cum.push(cum[i-1] + Math.hypot(prof[i].x-prof[i-1].x, prof[i].y-prof[i-1].y));
+  const total = cum[Pn-1];
+  const positions = [], uvs = [];
+  for(let ui=0; ui<=U; ui++){
+    const theta = (ui/U)*Math.PI*2;
+    const a = decoTwist(theta), ca = Math.cos(a), sa = Math.sin(a);
+    const rw = decoWaveOffset(theta), zw = decoWaveWidthOffset(theta);
+    const cx = Math.cos(theta), sy = Math.sin(theta);
+    for(let pi=0; pi<Pn; pi++){
+      const p = prof[pi];
+      const xr = p.x*ca - p.y*sa, yr = p.x*sa + p.y*ca;
+      const radial = R + xr + rw;
+      positions.push(radial*cx, radial*sy, yr + zw);
+      uvs.push(ui/U*10, cum[pi]/total);
+    }
+  }
+  const indices = [];
+  for(let ui=0; ui<U; ui++) for(let pi=0; pi<Pn-1; pi++){
+    const a = ui*Pn+pi, b=(ui+1)*Pn+pi, c=(ui+1)*Pn+pi+1, d=ui*Pn+pi+1;
+    indices.push(a,b,d, b,c,d);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions,3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs,2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  /* 接縫處(起訖重複的頂點)法線取平均,避免出現一條明顯的光影接縫 */
+  const n = geo.attributes.normal;
+  const avg = (i,j)=>{ const x=n.getX(i)+n.getX(j), y=n.getY(i)+n.getY(j), z=n.getZ(i)+n.getZ(j); const l=Math.hypot(x,y,z)||1; n.setXYZ(i,x/l,y/l,z/l); n.setXYZ(j,x/l,y/l,z/l); };
+  for(let pi=0; pi<Pn; pi++) avg(pi, U*Pn+pi);
+  for(let ui=0; ui<=U; ui++) avg(ui*Pn, ui*Pn+Pn-1);
+  n.needsUpdate = true;
+  return geo;
 }
 
 function getProfilePoints(shapeKey, halfWidth, halfThick){
@@ -1046,6 +1113,7 @@ function computeProfileNormals(profile){
 }
 
 function buildRingGeometry(shapeKey, halfWidth, halfThick, mainRadius){
+  if(shapeKey==='deco') return buildDecoRingGeometry(halfWidth, halfThick, mainRadius);
   const profileRaw = getProfilePoints(shapeKey, halfWidth, halfThick);
   const normalsRaw = computeProfileNormals(profileRaw);
   const profile = profileRaw.concat([profileRaw[0]]);
@@ -1104,9 +1172,9 @@ function curvedStarGeometry(size, longSize, mainRadius, halfThick, pop, waveFn, 
   }
   const mapPoint = (x,y) => {
     const theta = (baseAngle!==undefined ? baseAngle : Math.PI/2) + x/mainRadius;
-    const wave = waveFn ? waveFn(theta) : 0;
-    const radial = mainRadius + halfThick + wave + pop;
-    return new THREE.Vector3(radial*Math.cos(theta), radial*Math.sin(theta), y);
+    const surf = waveFn ? waveFn(theta, y) : {r: mainRadius + halfThick, z: y};
+    const radial = surf.r + pop;
+    return new THREE.Vector3(radial*Math.cos(theta), radial*Math.sin(theta), surf.z);
   };
   /* 沿星芒外圍每一段邊都細分取樣後再貼合波浪曲面,避免長角(2、5號)因單一頂點取樣
      跨越角度過大,在花邊(deco)波浪起伏劇烈處被戒圈表面遮住而顯示不完整 */
@@ -1438,6 +1506,13 @@ function _rebuildRingNow(){
   let halfThick = DEFAULT_HALF_THICK;
   if(viewShape==='plain') halfThick = Math.max(halfThick, visualHalfWidth*0.9);
 
+  {
+    /* 側邊星星位置也設為不扭轉區(角度需與下方 sideGroups 一致) */
+    const sc = parseInt(state.starCount, 10) || 1;
+    const sideDegs = sc===2 ? [33, 47] : [36];
+    DECO_FLAT_ZONES = [{c:Math.PI/2, flat:0.36, ramp:0.25}];
+    sideDegs.forEach(deg=>[deg,-deg].forEach(d=>DECO_FLAT_ZONES.push({c:Math.PI/2 + d*Math.PI/180, flat:0.1, ramp:0.14})));
+  }
   const geo = buildRingGeometry(viewShape, visualHalfWidth, halfThick, MAIN_RADIUS_MM);
   const mat = materialForFinish(state.finish);
 
@@ -1459,9 +1534,15 @@ function _rebuildRingNow(){
       map:getGemTexture(gemInfo), side:THREE.DoubleSide, depthTest:true
     });
     const gem = new THREE.Mesh(gemGeo, gemMat);
-    const decoOffset = (viewShape==='deco') ? decoWaveOffset(Math.PI/2) : 0;
-    gem.position.copy(bandPoint(90, MAIN_RADIUS_MM, halfThick, decoOffset + gemR*0.5, 0));
-    gem.rotation.x = -Math.PI/2;
+    if(viewShape==='deco'){
+      /* 寶石貼在扭轉後的外圈表面,並跟著該處表面的傾斜角度一起傾斜 */
+      const th = Math.PI/2, a = decoTwist(th), sf = decoSurface(th, 0, 1, halfThick, MAIN_RADIUS_MM), pop = gemR*0.5;
+      gem.position.set(0, sf.r + pop*Math.cos(a), sf.z + pop*Math.sin(a));
+      gem.rotation.x = -Math.PI/2 + a;
+    } else {
+      gem.position.copy(bandPoint(90, MAIN_RADIUS_MM, halfThick, gemR*0.5, 0));
+      gem.rotation.x = -Math.PI/2;
+    }
     gem.renderOrder = 1;
     ringGroup.add(gem);
   }
@@ -1479,7 +1560,12 @@ function _rebuildRingNow(){
     /* 星芒凸出量(相對於「該點當下戒圈表面」,已含波浪起伏)務必小於主石的凸出量,
        讓主石清楚浮現在星芒正中央之上,不會反過來被星芒擋住 */
     const starPop = Math.max(0.05, Math.min(0.1, starGemR*0.5 - 0.06));
-    const waveFn = (viewShape==='deco') ? decoWaveOffset : null;
+    /* 星芒整顆以中心點的上下波浪位置為準平移,不逐點跟著上下波浪彎曲,避免星芒被拉歪變形;
+       半徑方向仍逐點貼合表面,星芒不會陷進戒圈 */
+    const starSurfFn = (centerAngle)=> (viewShape==='deco')
+      ? ((th,y)=>{ const sf = decoSurface(th, y, 1, halfThick, MAIN_RADIUS_MM); sf.z = y + decoWaveWidthOffset(centerAngle); return sf; })
+      : null;
+    const waveFn = starSurfFn(Math.PI/2);
     const starGeo = curvedStarGeometry(starOuter, starLong, MAIN_RADIUS_MM, halfThick, starPop, waveFn);
     /* 銀白色+金屬感:改回會受場景燈光影響的 MeshStandardMaterial,
        用偏冷、偏白的中性銀色(不帶金黃色調)搭配高金屬度、低粗糙度,
@@ -1498,11 +1584,11 @@ function _rebuildRingNow(){
     const sidePop = Math.max(0.04, Math.min(0.08, starGemR*0.4 - 0.05));
     const sideGroups = sideCount===2
       ? [{deg:33, spikes:8, size:starOuter*0.62}, {deg:47, spikes:4, size:starOuter*0.5}] /* 第一組八芒星、第二組四芒星,間距略微拉大 */
-      : [{deg:40, spikes:4, size:starOuter*0.62}]; /* 只有一組時為四芒星,與中間六芒星拉開較大間距 */
+      : [{deg:36, spikes:4, size:starOuter*0.62}]; /* 只有一組時為四芒星,與中間六芒星拉開較大間距 */
     sideGroups.forEach(g=>{
       [g.deg, -g.deg].forEach(deg=>{
         const baseAngle = Math.PI/2 + THREE.MathUtils.degToRad(deg);
-        const sideGeo = curvedStarGeometry(g.size, 0, MAIN_RADIUS_MM, halfThick, sidePop, waveFn, baseAngle, g.spikes);
+        const sideGeo = curvedStarGeometry(g.size, 0, MAIN_RADIUS_MM, halfThick, sidePop, starSurfFn(baseAngle), baseAngle, g.spikes);
         const sideMesh = new THREE.Mesh(sideGeo, starMat);
         ringGroup.add(sideMesh);
       });
@@ -1523,7 +1609,10 @@ function _rebuildRingNow(){
       const spark = new THREE.Mesh(sparkGeo, sparkMat);
       const theta = Math.random()*360;
       const widthOffset = (Math.random()-0.5)*visualHalfWidth*1.7;
-      spark.position.copy(bandPoint(theta, MAIN_RADIUS_MM, halfThick, 0.01, widthOffset));
+      if(viewShape==='deco'){
+        const th = THREE.MathUtils.degToRad(theta), sf = decoSurface(th, widthOffset, 1, halfThick, MAIN_RADIUS_MM);
+        spark.position.set((sf.r+0.01)*Math.cos(th), (sf.r+0.01)*Math.sin(th), sf.z);
+      } else spark.position.copy(bandPoint(theta, MAIN_RADIUS_MM, halfThick, 0.01, widthOffset));
       ringGroup.add(spark);
     }
   }
@@ -1535,28 +1624,38 @@ function _rebuildRingNow(){
     const arc = engraveArcRadians(nominalRadius, cylH);
     const centerRad = (typeof centerAngleRad === 'number') ? centerAngleRad : THREE.MathUtils.degToRad(360);
     const thetaStart = centerRad - arc/2;
-    let decoOffset = 0;
-    if(viewShape==='deco'){
-      /* 花邊表面是連續波浪,刻字弧線橫跨的角度範圍內波浪高低都不同;
-         取弧線範圍內多個取樣點的「最大值」而非單一中心點,確保整條刻字弧線都清楚浮現在波浪表面之上 */
-      let maxOffset = -Infinity;
-      const samples = 12;
-      for(let i=0;i<=samples;i++){
-        /* thetaStart 是 CylinderGeometry 自身的 u 座標,需先換算回與 decoWaveOffset 其他呼叫處
-           一致的實際環周角度 φ(u - 90 度),取樣才會對到波浪表面真正的高低起伏位置 */
-        const u = thetaStart + (arc*i/samples);
-        maxOffset = Math.max(maxOffset, decoWaveOffset(u - Math.PI/2));
-      }
-      decoOffset = maxOffset;
-    }
-    const dir = isInner ? -1 : 1;
-    const radius = nominalRadius + dir*decoOffset;
-    const textGeo = new THREE.CylinderGeometry(radius, radius, cylH, 64, 1, true, thetaStart, arc);
     const textTex = buildEngraveTexture(text, colorHex, !isInner, fontFamily);
     const textMat = new THREE.MeshBasicMaterial({map:textTex, transparent:true, side:THREE.DoubleSide, depthWrite:false});
-    const textMesh = new THREE.Mesh(textGeo, textMat);
-    textMesh.rotation.x = Math.PI/2;
-    if(zOffset) textMesh.position.z = zOffset; /* 厚度側邊刻字:往戒圈其中一側邊緣偏移,呈現在側邊而非正中央 */
+    let textMesh;
+    if(viewShape==='deco'){
+      /* 花邊為扭轉波浪表面,刻字改用逐點貼合表面的曲面帶(頂點排列與 UV 和 CylinderGeometry 相同,貼圖方向不變) */
+      const side = isInner ? -1 : 1, segX = 96, segY = 6, halfH = cylH/2;
+      const pos = [], uv = [], idx = [];
+      for(let iy=0; iy<=segY; iy++){
+        const v = iy/segY, yl = halfH - v*cylH + (zOffset||0);
+        for(let ix=0; ix<=segX; ix++){
+          const uf = ix/segX, phi = thetaStart + uf*arc - Math.PI/2;
+          const sf = decoSurface(phi, yl, side, halfThick, MAIN_RADIUS_MM);
+          const r = sf.r + side*0.08;
+          pos.push(r*Math.cos(phi), r*Math.sin(phi), sf.z);
+          uv.push(uf, 1-v);
+        }
+      }
+      for(let iy=0; iy<segY; iy++) for(let ix=0; ix<segX; ix++){
+        const a = iy*(segX+1)+ix, b = (iy+1)*(segX+1)+ix;
+        idx.push(a,b,a+1, b,b+1,a+1);
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv,2));
+      g.setIndex(idx);
+      textMesh = new THREE.Mesh(g, textMat);
+    } else {
+      const textGeo = new THREE.CylinderGeometry(nominalRadius, nominalRadius, cylH, 64, 1, true, thetaStart, arc);
+      textMesh = new THREE.Mesh(textGeo, textMat);
+      textMesh.rotation.x = Math.PI/2;
+      if(zOffset) textMesh.position.z = zOffset; /* 厚度側邊刻字:往戒圈其中一側邊緣偏移,呈現在側邊而非正中央 */
+    }
     ringGroup.add(textMesh);
   }
   if(state.engraveInnerOn && state.engraveInnerText){
